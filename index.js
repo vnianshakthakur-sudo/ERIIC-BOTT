@@ -26,6 +26,8 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
 const procs = {};
+// UID jinhe MANUALLY panel se roka gaya — ye crash pe restart NAHI honge
+const manuallyStopped = new Set();
 
 function appendLog(uid, text) {
   try {
@@ -38,6 +40,13 @@ function appendLog(uid, text) {
   } catch (e) {
     console.error("appendLog failed:", e.message);
   }
+}
+
+function spawnBot(admin) {
+  const child = fork(path.join(__dirname, "bot.js"), [String(admin)], { silent: true });
+  setupChild(child, admin);
+  procs[admin] = child;
+  return child;
 }
 
 function setupChild(child, admin) {
@@ -70,6 +79,45 @@ function setupChild(child, admin) {
     appendLog(admin, msg);
     io.to(String(admin)).emit("botlog", msg);
     delete procs[admin];
+
+    // ============================================
+    // 🔄 AUTO-RESTART ON CRASH
+    // Manual stop se ruka ho toh restart NAHI
+    // Appstate valid ho toh 5s baad khud restart
+    // ============================================
+    if (manuallyStopped.has(String(admin))) {
+      manuallyStopped.delete(String(admin));
+      const stopMsg = `🛑 Bot manually stopped — auto-restart disabled.`;
+      appendLog(admin, stopMsg);
+      io.to(String(admin)).emit("botlog", stopMsg);
+      return;
+    }
+
+    const appstatePath = path.join(USERS_DIR, String(admin), "appstate.json");
+    if (!fs.existsSync(appstatePath)) {
+      const noStateMsg = `⚠️ Auto-restart skipped — appstate.json nahi mila.`;
+      appendLog(admin, noStateMsg);
+      io.to(String(admin)).emit("botlog", noStateMsg);
+      return;
+    }
+
+    // Appstate valid hai — 5 second baad restart
+    const retryMsg = `🔄 Crash detected! 5s baad auto-restart ho raha hai...`;
+    appendLog(admin, retryMsg);
+    io.to(String(admin)).emit("botlog", retryMsg);
+
+    setTimeout(() => {
+      // Check again: manually stopped nahi kiya meanwhile
+      if (manuallyStopped.has(String(admin))) {
+        manuallyStopped.delete(String(admin));
+        return;
+      }
+      const restartMsg = `🚀 Auto-restarting bot for ${admin}...`;
+      appendLog(admin, restartMsg);
+      io.to(String(admin)).emit("botlog", restartMsg);
+      spawnBot(admin);
+    }, 5000);
+    // ============================================
   });
 }
 
@@ -116,9 +164,9 @@ app.post("/start-bot", (req, res) => {
     try { procs[admin].kill(); } catch {}
   }
 
-  const child = fork(path.join(__dirname, "bot.js"), [String(admin)], { silent: true });
-  setupChild(child, admin);
-  procs[admin] = child;
+  // Manual start — manuallyStopped hata do taaki crash pe auto-restart kaam kare
+  manuallyStopped.delete(String(admin));
+  spawnBot(admin);
 
   appendLog(admin, `✅ Bot started for admin ${admin}`);
   io.to(String(admin)).emit("botlog", `✅ Bot started for ${admin}`);
@@ -130,6 +178,8 @@ app.get("/stop-bot", (req, res) => {
   if (!uid) return res.status(400).send("❌ uid missing");
   if (!procs[uid]) return res.send("⚠️ Bot not running");
   try {
+    // Manual stop — auto-restart band karo
+    manuallyStopped.add(String(uid));
     const proc = procs[uid];
     delete procs[uid];
     proc.kill("SIGTERM");
@@ -140,6 +190,7 @@ app.get("/stop-bot", (req, res) => {
     io.to(String(uid)).emit("botlog", "🔴 Bot stopped by panel");
     res.send("🔴 stopped");
   } catch (e) {
+    manuallyStopped.delete(String(uid));
     res.status(500).send("❌ Failed to stop: " + e.message);
   }
 });
@@ -151,6 +202,35 @@ app.get("/logs", (req, res) => {
   if (!fs.existsSync(lf)) return res.send("(No logs yet)");
   res.send(fs.readFileSync(lf, "utf8"));
 });
+
+// ============================================
+// 📡 TELEGRAM CONFIG — PANEL SE SAVE/LOAD
+// ============================================
+app.post("/save-telegram-config", (req, res) => {
+  const { admin, token, chatId } = req.body;
+  if (!admin) return res.status(400).json({ success: false, message: "admin UID required" });
+  const userDir = path.join(USERS_DIR, String(admin));
+  fs.ensureDirSync(userDir);
+  try {
+    fs.writeJsonSync(path.join(userDir, "telegram_config.json"), { token: token || "", chatId: chatId || "" }, { spaces: 2 });
+    res.json({ success: true, message: "✅ Telegram config saved!" });
+  } catch (e) {
+    res.status(500).json({ success: false, message: "❌ Save failed: " + e.message });
+  }
+});
+
+app.get("/get-telegram-config", (req, res) => {
+  const uid = req.query.uid;
+  if (!uid) return res.status(400).json({ success: false });
+  const cfgPath = path.join(USERS_DIR, String(uid), "telegram_config.json");
+  if (!fs.existsSync(cfgPath)) return res.json({ token: "", chatId: "" });
+  try {
+    res.json(fs.readJsonSync(cfgPath));
+  } catch {
+    res.json({ token: "", chatId: "" });
+  }
+});
+// ============================================
 
 server.listen(PORT, "0.0.0.0", () =>
   console.log(`🚀 ANURAG PANEL running on http://0.0.0.0:${PORT}`)
