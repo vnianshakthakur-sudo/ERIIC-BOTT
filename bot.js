@@ -43,12 +43,21 @@ const RANDOM_PHOTOS_DIR = path.join(ROOT, "assets", "random");
 const REPLIT_DOMAIN = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS || "";
 
 // ============================================
-// TELEGRAM CONFIG - RENDER ENV SE AAYEGA
-// Render Dashboard → Environment → Add Variable
+// TELEGRAM CONFIG - PANEL YA ENV SE AAYEGA
+// Panel me "Telegram Settings" section se save karo
+// Ya Render/Replit env TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_CHAT_ID set karo
 // ============================================
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const TELEGRAM_ALLOWED_CHAT_ID = process.env.TELEGRAM_ALLOWED_CHAT_ID || "";
+const TELEGRAM_CONFIG_PATH = path.join(USER_DIR, "telegram_config.json");
+let _tgCfg = {};
+try {
+  if (fs.existsSync(TELEGRAM_CONFIG_PATH)) {
+    _tgCfg = JSON.parse(fs.readFileSync(TELEGRAM_CONFIG_PATH, "utf8"));
+  }
+} catch {}
+
+const TELEGRAM_BOT_TOKEN = _tgCfg.token || process.env.TELEGRAM_BOT_TOKEN || "";
+const TELEGRAM_ALLOWED_CHAT_ID = _tgCfg.chatId || process.env.TELEGRAM_ALLOWED_CHAT_ID || "";
 const TELEGRAM_GROUP_LIMIT = Number(process.env.TELEGRAM_GROUP_LIMIT || 80);
 const TELEGRAM_LOG_EVERY_MS = 3_600_000; // 1 hour — fixed
 const TELEGRAM_LOG_MAX_LINES = Number(process.env.TELEGRAM_LOG_MAX_LINES || 40);
@@ -940,9 +949,7 @@ function startTelegramBridge(api, runFacebookCommand) {
     );
   }
 
-  setInterval(() => {
-    flushTelegramLogs(false).catch(e => log("⚠️ Telegram log send failed: " + errStr(e)));
-  }, TELEGRAM_LOG_EVERY_MS);
+  // Auto hourly log flush HATAYA — ab sirf /logs command pe bhejega
 
   tg.on("message", async (msg) => {
     try {
@@ -1040,7 +1047,7 @@ setInterval(() => {
   const now = Date.now();
   const lastEvent = Math.floor((now - lastEventTime) / 1000);
   if (botHealthy) {
-    log(`💓 Bot heartbeat - Last event ${lastEvent}s ago`);
+    log(`❤️ Heartbeat — Last event ${lastEvent}s ago | Bot ALIVE`);
   }
 }, 30 * 1000);
 
@@ -1071,6 +1078,45 @@ loginFunc({ appState, logLevel: "silent" }, async (err, api) => {
   
   botHealthy = true;
   const BOT_UID = api.getCurrentUserID ? api.getCurrentUserID() : null;
+
+  // ============================================
+  // 💾 APPSTATE SAVE STRATEGY
+  // Login ke baad, periodic, aur exit pe save karo
+  // Taaki crash/restart pe fresh appstate se chal sake
+  // ============================================
+  function saveAppState() {
+    try {
+      const freshState = api.getAppState ? api.getAppState() : null;
+      if (freshState && Array.isArray(freshState) && freshState.length > 0) {
+        fs.writeFileSync(APPSTATE_PATH, JSON.stringify(freshState, null, 2));
+        log("💾 [APPSTATE] Saved fresh appstate to disk.");
+      }
+    } catch (e) {
+      log("⚠️ [APPSTATE] Save failed: " + e.message);
+    }
+  }
+
+  // Turant login ke baad save karo
+  saveAppState();
+
+  // Har 10 minute mein auto-save karo
+  setInterval(saveAppState, 10 * 60 * 1000);
+
+  // Exit/crash signals pe bhi save karo
+  const _appstateExitHandler = () => { saveAppState(); saveLocks(); };
+  process.once("exit", _appstateExitHandler);
+  process.once("uncaughtException", (e) => {
+    log("❌ [CRASH] uncaughtException: " + e.message);
+    saveAppState();
+    saveLocks();
+    process.exit(1);
+  });
+  process.once("unhandledRejection", (reason) => {
+    log("❌ [CRASH] unhandledRejection: " + String(reason));
+    saveAppState();
+    saveLocks();
+  });
+  // ============================================
 
   log("📡 Listening for group events...");
   log("🎨 Theme protection ACTIVE!");
