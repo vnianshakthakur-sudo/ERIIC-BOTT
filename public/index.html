@@ -436,6 +436,32 @@
             </div>
         </div>
 
+        <!-- 📡 TELEGRAM SETTINGS -->
+        <div class="controls" style="margin-top:0;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:15px;">
+                <i class="fab fa-telegram" style="font-size:20px;color:#229ED9;"></i>
+                <span style="font-size:15px;font-weight:bold;color:#fff;letter-spacing:1px;">TELEGRAM SETTINGS</span>
+                <span style="font-size:11px;color:#aaa;">(bot restart hone pe bhi kaam karega)</span>
+            </div>
+            <div class="input-group">
+                <label><i class="fab fa-telegram"></i> Telegram Bot Token</label>
+                <input type="text" id="tgToken" placeholder="1234567890:AAFxxxx..." autocomplete="off">
+            </div>
+            <div class="input-group">
+                <label><i class="fas fa-hashtag"></i> Allowed Chat ID</label>
+                <input type="text" id="tgChatId" placeholder="-100xxxxxxxxxx ya aapka chat ID">
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="btn btn-start" style="flex:1;min-width:120px;" onclick="saveTelegramConfig()">
+                    <i class="fas fa-save"></i> SAVE CONFIG
+                </button>
+                <button class="btn btn-refresh" style="flex:1;min-width:120px;" onclick="loadTelegramConfig()">
+                    <i class="fas fa-download"></i> LOAD SAVED
+                </button>
+            </div>
+            <div id="tg-status" style="margin-top:10px;font-size:13px;display:none;"></div>
+        </div>
+
         <div class="logs-section">
             <div class="logs-header">
                 <h3>
@@ -542,6 +568,61 @@
             a.download = `bot-logs-${new Date().toISOString().slice(0, 10)}.txt`;
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        // 📡 TELEGRAM CONFIG FUNCTIONS
+        async function saveTelegramConfig() {
+            const admin = adminInput.value.trim();
+            const token = document.getElementById('tgToken').value.trim();
+            const chatId = document.getElementById('tgChatId').value.trim();
+            const statusEl = document.getElementById('tg-status');
+
+            if (!admin) {
+                statusEl.style.display = 'block';
+                statusEl.style.color = '#e74c3c';
+                statusEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> Pehle Admin UID bharo!';
+                return;
+            }
+
+            try {
+                const res = await fetch('/save-telegram-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ admin, token, chatId })
+                });
+                const data = await res.json();
+                statusEl.style.display = 'block';
+                statusEl.style.color = data.success ? '#2ecc71' : '#e74c3c';
+                statusEl.innerHTML = (data.success ? '<i class="fas fa-check-circle"></i> ' : '<i class="fas fa-times-circle"></i> ') + data.message;
+            } catch (e) {
+                statusEl.style.display = 'block';
+                statusEl.style.color = '#e74c3c';
+                statusEl.innerHTML = '<i class="fas fa-times-circle"></i> Error: ' + e.message;
+            }
+        }
+
+        async function loadTelegramConfig() {
+            const admin = adminInput.value.trim();
+            const statusEl = document.getElementById('tg-status');
+            if (!admin) {
+                statusEl.style.display = 'block';
+                statusEl.style.color = '#e74c3c';
+                statusEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> Pehle Admin UID bharo!';
+                return;
+            }
+            try {
+                const res = await fetch(`/get-telegram-config?uid=${admin}`);
+                const data = await res.json();
+                document.getElementById('tgToken').value = data.token || '';
+                document.getElementById('tgChatId').value = data.chatId || '';
+                statusEl.style.display = 'block';
+                statusEl.style.color = '#44aaff';
+                statusEl.innerHTML = '<i class="fas fa-info-circle"></i> Config load ho gaya.';
+            } catch (e) {
+                statusEl.style.display = 'block';
+                statusEl.style.color = '#e74c3c';
+                statusEl.innerHTML = '<i class="fas fa-times-circle"></i> Load failed: ' + e.message;
+            }
         }
 
         // 🔌 SOCKET EVENTS
