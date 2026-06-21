@@ -232,7 +232,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // ⚡ ULTRA FAST QUEUES
 const nickQueue = [];
 let nickProcessing = false;
-const NICK_DELAY_MS = 30;
+const NICK_DELAY_MS = 600;
 
 const nameQueue = [];
 let nameProcessing = false;
